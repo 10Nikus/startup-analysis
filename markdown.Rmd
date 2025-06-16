@@ -1,0 +1,284 @@
+---
+title: "Startup analysis"
+author: "Nikodem Kijas"
+date: "2025-06-13"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(rio)
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(corrplot)
+library(e1071)
+```
+
+## **Data import and cleaning.**
+### We start the anylysis from importing data set using function import() from "rio" package.
+```{r}
+
+df <- import("startup_data.csv")
+
+```
+### We check is there any missing (NA) value in our dataset.
+```{r}
+sum(is.na(df))
+```
+
+### We display the first and last rows of dataset.
+```{r}
+knitr::kable(head(df))
+knitr::kable(tail(df))
+```
+
+## **Descriptive statistics.**
+```{r}
+numeric_cols <- df %>%
+  select(where(is.numeric)) %>%
+  colnames()
+
+
+summary_df <- data.frame(
+  Variable = character(),
+  Min = numeric(),
+  Max = numeric(),
+  Mean = numeric(),
+  Median = numeric(),
+  SD = numeric(),
+  Skewness = numeric(),
+  Kurtosis = numeric(),
+  stringsAsFactors = FALSE
+)
+
+
+
+for (var in numeric_cols) {
+  x <- df[[var]]
+  summary_df <- rbind(summary_df, data.frame(
+    Variable = var,
+    Min = min(x, na.rm = TRUE),
+    Max = max(x, na.rm = TRUE),
+    Mean = mean(x, na.rm = TRUE),
+    Median = median(x, na.rm = TRUE),
+    SD = sd(x, na.rm = TRUE),
+    Skewness = skewness(x, na.rm = TRUE),
+    Kurtosis = kurtosis(x, na.rm = TRUE)
+  ))
+}
+```
+
+
+```{r}
+knitr::kable(summary_df)
+```
+### We calculated basic descriptive statistics such as min, max, mean, median, standard deviation, skewness and curtiosis for all numeric variables. The result show us structure and distribution of dataset.
+
+```{r}
+t.test(`Valuation (M USD)` ~ Profitable, data = df)
+```
+### The t-test of Valuation and Profiitable showed that the difference in avereage valuation between porfitable and non profitable is statistically valuable, because p-value is smaller than 0,05. So generally we can say that profitable startups have higher average valuation.
+```{r}
+ggplot(df, aes(x = `Exit Status`, y = `Valuation (M USD)`)) +
+  geom_boxplot(fill = "skyblue") +
+  labs(title = "Valuation by Exit Status",
+       x = "Exit Status", y = "Valuation (M USD)") +
+  theme_minimal()
+```
+
+### This boxplot show us distribution of valuation in different exit status.  On the first look we can't see any significant impact on valuation.
+
+### So we will make more formal statistical test which is Anova test.
+
+```{r}
+anova_result <- aov(`Valuation (M USD)` ~ `Exit Status`, data = df)
+summary(anova_result)
+```
+
+### The Anova test shows that difference of average startup valuation is not statistically significant, because p-value is much greater than 0.05. So we cannot say that exit status has an impact on startup valuation .
+
+## **Visualisation of Variable Distributions.**
+```{r}
+region_counts <- df %>%
+  count(Region) %>%
+  mutate(percentage = n / sum(n) * 100,
+         label = paste0( round(percentage, 1), "%"))
+
+
+ggplot(region_counts, aes(x = "", y = n, fill = Region)) +
+  geom_bar(stat = "identity", width = 1, color = "black") +
+  coord_polar("y") +
+  labs(title = "Startup Distribution by Region") +
+  theme_void() +
+  geom_text(aes(label = label), position = position_stack(vjust = 0.5),
+            size = 3.5)
+```
+
+### The pie chart shows the distributions of startups across different regions. Segments shows the percentage of Startups founded in every region. 
+
+
+```{r}
+ggplot(df, aes(x = Industry, fill=Industry))+
+  geom_bar()+
+  coord_flip()+
+  theme_minimal()
+```
+
+### The bar chart displays the number of startups in each industry.
+
+#### The visualisations from both charts indicate that data set is well prepared and has a variety data .
+
+
+
+
+## **Visualisation of Relatshionships Between Variables.**
+```{r}
+
+ggplot(df, aes(x = `Revenue (M USD)`, y = `Valuation (M USD)`))+
+  geom_point(alpha = 0.6, color = "steelblue") +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  labs(title = "Valuation vs Revenue",
+       x = "Revenue (M USD)", y = "Valuation (M USD)") +
+  theme_minimal()
+
+
+
+ggplot(df, aes(x = `Funding Amount (M USD)`, y =`Market Share (%)`))+
+  geom_point(alpha = 0.6, color = "steelblue") +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  labs(title = "Funding Amount vs Market share",
+       x = "Funding Amount (M USD)", y = "Market Share (%)") +
+  theme_minimal()
+
+ggplot(df, aes(x = `Revenue (M USD)`, y = Employees))+
+  geom_point(alpha = 0.6, color = "steelblue") +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  labs(title = "Employees vs Revenue",
+       x = "Revenue (M USD)", y = "Employees") +
+  theme_minimal()
+```
+
+### The above scatterplots explore a linear relationship between the pairs of variables.
+ - Revenue vs Valuation
+ - Funding Amount vs Market share
+ - Revenue vs Number of Employees
+
+### In each case, the linear regression line added by geom_smooth(method = "lm") is nearly flat, which suggest that there is no stronger linear relationship between variables.
+
+
+## **Simple Linear Regression Model.** 
+```{r}
+
+model1 <- lm(`Valuation (M USD)` ~ `Revenue (M USD)`, data = df)
+summary(model1)
+
+par(mfrow = c(2, 2))
+plot(model1)
+
+par(mfrow = c(1,1))
+```
+
+### The above is a simple model of linear regression to predict valuation based on revenue. However an R-squared value is low, so linear relationship is weak. Based on observation, logarithmic transformation was applied.
+
+
+## **Log Transformed Linear Model**
+```{r}
+df$log_revenue <- log(df$`Revenue (M USD)` + 1)
+df$log_valuation <- log(df$`Valuation (M USD)` + 1)
+
+model_log <- lm(log_valuation ~ log_revenue, data = df)
+summary(model_log)
+```
+
+## After transformation, a new model was built. The result is better fitted than previous one, what can we see in higher R-squared value and more linear relationship.
+
+## **Multiple Linear Regression Model.**
+```{r}
+model1 <- lm(`Valuation (M USD)` ~ `Revenue (M USD)` + 
+               `Funding Amount (M USD)`, data = df)
+summary(model1)
+
+model2 <- lm(`Valuation (M USD)` ~ `Revenue (M USD)` + 
+               `Funding Amount (M USD)` + 
+               Employees + `Market Share (%)`, data = df)
+summary(model2)
+
+
+plot(model1)
+plot(model2)
+
+```
+
+### Compared two linear regression models:
+- model1 which includes Revenue and Funding amount
+- model2 adds Employees and Market share to model1
+### Both models are statistically significant (p-value < 0,001). The difference between R-squared or Residual Standard Error is marginally. Even if the improvment is modest, model2 better capture the variation in valuation by including more variables.
+
+
+## **Correlation Analysis**
+```{r}
+df <- df %>% select(-log_revenue, -log_valuation)
+numeric_data <- df[sapply(df, is.numeric)]
+
+cor_matrix <- cor(numeric_data, use = "complete.obs")
+
+corrplot(cor_matrix, 
+         method="color", 
+         type="upper",
+         addCoef.col = "black", 
+         number.cex = 0.8, 
+         tl.cex = 0.8, 
+         tl.col = "black")
+```
+
+### A correlation matrix was created for all numeric variables to find potential linear relationship. Almost for each pair of variable the correlation is close to 0, the only strong linear relationship was observed between funding amount and revenue.
+
+```{r}
+
+ggplot(df, aes(x = `Funding Amount (M USD)`, y = `Valuation (M USD)`))+
+  geom_point(alpha = 0.6, color = "steelblue") +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  labs(title = "Funding Amount vs Valuation",
+       x = "Funding Amount (M USD)", y = "Valuation (M USD)") +
+  theme_minimal()
+```
+
+### The scatter plot above represents relationship between Funding amount and Valuation. Red regression line confirms pattern that valuation increase when funding amount rise. 
+
+## **Time Series and Seasonality Analysis.**
+```{r}
+founded_per_year <- df %>%
+  count(`Year Founded`)
+
+ggplot(founded_per_year, aes(x= `Year Founded`, y = n))+
+  geom_point(color="dark red", size=1)+
+  geom_line(color="dark red", size=1)+
+  theme_minimal()
+
+
+```
+
+### The line plot represent amount of startups founded in each year. The trend appears irregular, without clear pattern or annual cycles.
+
+```{r}
+
+ts_startups = ts(founded_per_year$n, 
+                      start = min(founded_per_year$`Year Founded`), 
+                      frequency = 2)
+
+
+
+decomp_add <- decompose(ts_startups, type = "additive")
+plot(decomp_add)
+
+
+decomp_mult <- decompose(ts_startups, type = "multiplicative")
+plot(decomp_mult)
+```
+
+
+<span style="color:red">Unfortunately our dataset includes only year of each startup funding, so we can't perform a proper seasonal analysis. To allow decompose to run we were forced to set fake frequency = 2 only to demonstrate seasonability analysis. We can't get any valid information from this chunk.<span/>
+
+
+
